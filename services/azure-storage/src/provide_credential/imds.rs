@@ -81,8 +81,14 @@ struct AccessTokenResponse {
 async fn get_access_token(resource: &str, ctx: &Context) -> Result<AccessTokenResponse> {
     let envs = ctx.env_vars();
 
+    // Check for managed identity endpoint from various sources:
+    // - IDENTITY_ENDPOINT: Azure Container Instances (ACI)
+    // - AZURE_IMDS_ENDPOINT: Custom IMDS endpoint
+    // - AZBLOB_ENDPOINT: Legacy/opendal-specific
+    // - Default: Standard Azure VM IMDS endpoint
     let endpoint = envs
-        .get("AZBLOB_ENDPOINT")
+        .get("IDENTITY_ENDPOINT")
+        .or_else(|| envs.get("AZBLOB_ENDPOINT"))
         .or_else(|| envs.get("AZURE_IMDS_ENDPOINT"))
         .filter(|e| !e.is_empty())
         .map(|s| s.as_str())
@@ -105,7 +111,13 @@ async fn get_access_token(resource: &str, ctx: &Context) -> Result<AccessTokenRe
         .header("Metadata", "true");
 
     // Add MSI secret header if provided in environment
-    if let Some(msi_secret) = envs.get("AZURE_MSI_SECRET").filter(|s| !s.is_empty()) {
+    // IDENTITY_HEADER: Azure Container Instances (ACI)
+    // AZURE_MSI_SECRET: Custom/legacy
+    if let Some(msi_secret) = envs
+        .get("IDENTITY_HEADER")
+        .or_else(|| envs.get("AZURE_MSI_SECRET"))
+        .filter(|s| !s.is_empty())
+    {
         req = req.header("X-IDENTITY-HEADER", msi_secret);
     }
 
